@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Runner 3D (Drive Vibe) — 1 HTML</title>
+  <style>
+    html,body{height:100%;margin:0;overflow:hidden;background:#05070a;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;touch-action:none}
+    canvas{display:block}
+
+    #hud{position:fixed;inset:0;pointer-events:none;color:#eaf1ff;text-shadow:0 2px 12px rgba(0,0,0,.7)}
+    #bar{position:absolute;left:10px;top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+      padding:10px 12px;border-radius:12px;background:rgba(20,30,50,.35);backdrop-filter:blur(6px);
+      border:1px solid rgba(255,255,255,.10)}
+    .pill{padding:6px 10px;border-radius:999px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.10)}
+    #msg{position:absolute;left:10px;bottom:170px;max-width:min(720px,92vw);
+      padding:10px 12px;border-radius:12px;background:rgba(20,30,50,.35);backdrop-filter:blur(6px);
+      border:1px solid rgba(255,255,255,.10);line-height:1.35}
+
+    #overlay{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(ellipse at center, rgba(0,0,0,.55), rgba(0,0,0,.92));color:#eaf1ff}
+    #panel{width:min(860px,92vw);padding:18px;border-radius:18px;background:rgba(20,30,50,.42);
+      border:1px solid rgba(255,255,255,.12);box-shadow:0 20px 60px rgba(0,0,0,.45)}
+    #panel h1{margin:0 0 8px;font-size:22px}
+    #panel p{margin:0 0 14px;opacity:.92}
+    #row{display:flex;gap:10px;flex-wrap:wrap}
+    .btn{pointer-events:auto;cursor:pointer;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.25);color:#eaf1ff;
+      padding:10px 12px;border-radius:12px;user-select:none;-webkit-tap-highlight-color:transparent}
+    .btn:active{transform:translateY(1px)}
+
+    /* Controles mobile */
+    #touchUI{position:fixed;inset:0;pointer-events:none}
+    .btnCol{position:absolute;right:18px;bottom:18px;display:flex;flex-direction:column;gap:12px;pointer-events:auto}
+    .mbtn{
+      width:86px;height:86px;border-radius:20px;display:grid;place-items:center;
+      background:rgba(20,30,50,.25);border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(6px);
+      color:#eaf1ff;font-weight:800;user-select:none;-webkit-tap-highlight-color:transparent
+    }
+    .mbtn:active{transform:translateY(1px) scale(.99)}
+    .leftCol{position:absolute;left:18px;bottom:18px;display:flex;gap:12px;pointer-events:auto}
+  </style>
+</head>
+<body>
+
+  <!-- Música (coloque nightcall.mp3 na mesma pasta) -->
+  <audio id="bgm" src="nightcall.mp3" preload="auto" loop></audio>
+
+  <div id="hud">
+    <div id="bar">
+      <div class="pill">🏁 Distância: <span id="dist">0</span> m</div>
+      <div class="pill">🪙 Moedas: <span id="coins">0</span></div>
+      <div class="pill">⚡ Velocidade: <span id="spd">0</span></div>
+    </div>
+    <div id="msg">
+      <b>PC:</b> ← → ou A/D • Espaço pular<br>
+      <b>Celular:</b> botões ⬅️➡️ e ⬆️<br>
+      Obstáculos: <b>pilhas de pneus</b> • Fundo: <b>bg.jpg</b> (fixo no infinito) • Música: <b>nightcall.mp3</b>
+    </div>
+  </div>
+
+  <div id="touchUI">
+    <div class="leftCol">
+      <div class="mbtn" id="leftBtn">⬅️</div>
+      <div class="mbtn" id="rightBtn">➡️</div>
+    </div>
+    <div class="btnCol">
+      <div class="mbtn" id="jumpBtn">⬆️</div>
+      <div class="mbtn" id="resetBtn">🔁</div>
+    </div>
+  </div>
+
+  <div id="overlay">
+    <div id="panel">
+      <h1 id="title">Runner 3D (Drive Vibe)</h1>
+      <p id="sub">
+        Aperte <b>Jogar</b>. (A música só toca depois do seu toque — regra do celular.)
+        <br>Coloque <b>bg.jpg</b> e <b>nightcall.mp3</b> na pasta.
+      </p>
+      <div id="row">
+        <button class="btn" id="playBtn" type="button">Jogar</button>
+        <button class="btn" id="hardBtn" type="button">Dificuldade +</button>
+        <button class="btn" id="easyBtn" type="button">Dificuldade -</button>
+      </div>
+      <p style="margin-top:10px;opacity:.85;font-size:13px">
+        Se abrir no celular como arquivo e bugar, use Chrome ou Live Server/GitHub Pages/Netlify.
+      </p>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+
+    const $ = (id)=>document.getElementById(id);
+
+    // UI
+    const overlay = $("overlay");
+    const playBtn = $("playBtn");
+    const hardBtn = $("hardBtn");
+    const easyBtn = $("easyBtn");
+
+    const distEl = $("dist");
+    const coinsEl = $("coins");
+    const spdEl = $("spd");
+
+    // Música
+    const bgm = $("bgm");
+    bgm.volume = 0.35;
+    async function playBgm(){
+      try { await bgm.play(); }
+      catch (e) { console.warn("Não consegui tocar a música automaticamente:", e); }
+    }
+
+    // THREE
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x05070a, 22, 220);
+
+    const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 600);
+    camera.position.set(0, 7.2, 12);
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.HemisphereLight(0x9fb7ff, 0x24304a, 0.95));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+    sun.position.set(10, 18, 6);
+    scene.add(sun);
+
+    // Track
+    const track = new THREE.Group();
+    scene.add(track);
+
+    const laneX = [-3.2, 0, 3.2];
+    const segLen = 18;
+    const segCount = 12;
+
+    const groundMat = new THREE.MeshStandardMaterial({ color:0x0f1729, roughness:1, metalness:0 });
+    const lineMat = new THREE.MeshStandardMaterial({ color:0x162447, roughness:1 });
+
+    const segments = [];
+    for(let i=0;i<segCount;i++){
+      const g = new THREE.Group();
+
+      const base = new THREE.Mesh(new THREE.BoxGeometry(12, 0.6, segLen), groundMat);
+      base.position.set(0, -0.3, 0);
+      g.add(base);
+
+      for (let k=0;k<2;k++){
+        const l = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.02, segLen), lineMat);
+        l.position.set(k===0 ? -1.6 : 1.6, 0.01, 0);
+        g.add(l);
+      }
+
+      g.position.z = -i * segLen;
+      track.add(g);
+      segments.push(g);
+    }
+
+    // Player (carro)
+    const player = new THREE.Group();
+    scene.add(player);
+    player.position.set(0, 0, 2);
+
+    const carBodyMat = new THREE.MeshStandardMaterial({
+      color: 0x3b7dff,
+      roughness: 0.35,
+      metalness: 0.25,
+      emissive: 0x0f2d7a,
+      emissiveIntensity: 0.25
+    });
+    const carCabinMat = new THREE.MeshStandardMaterial({
+      color: 0x0b1222,
+      roughness: 0.15,
+      metalness: 0.4
+    });
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0b0f18, roughness: 0.95, metalness: 0.05 });
+    const rimMat = new THREE.MeshStandardMaterial({ color: 0x2a3550, roughness: 0.4, metalness: 0.6 });
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.55, 3.2), carBodyMat);
+    body.position.y = 0.45;
+    player.add(body);
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.55, 1.35), carCabinMat);
+    cabin.position.set(0, 0.85, -0.25);
+    player.add(cabin);
+
+    const lightMat = new THREE.MeshStandardMaterial({ color:0xffffff, emissive:0xa9c7ff, emissiveIntensity:0.9, roughness:0.2 });
+    const headL = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.18, 0.12), lightMat);
+    headL.position.set(-0.55, 0.42, 1.58);
+    const headR = headL.clone(); headR.position.x = 0.55;
+    player.add(headL, headR);
+
+    const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.35, 18);
+    wheelGeo.rotateZ(Math.PI/2);
+
+    function makeWheel(x, z){
+      const w = new THREE.Mesh(wheelGeo, wheelMat);
+      w.position.set(x, 0.25, z);
+      const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.18,0.36, 14), rimMat);
+      rim.geometry.rotateZ(Math.PI/2);
+      rim.position.copy(w.position);
+      player.add(w, rim);
+      return w;
+    }
+    const wheels = [
+      makeWheel(-0.75,  1.05),
+      makeWheel( 0.75,  1.05),
+      makeWheel(-0.75, -1.05),
+      makeWheel( 0.75, -1.05),
+    ];
+
+    // Estado
+    let playing = false;
+    let difficulty = 1.0;
+    let speed = 10.5;
+    let dist = 0;
+    let coinCount = 0;
+
+    let lane = 1;
+    let yVel = 0;
+    let onGround = true;
+
+    // Obstáculos e moedas
+    const obstacles = [];
+    const coins = [];
+
+    // Pilhas de pneus
+    const tireMat = new THREE.MeshStandardMaterial({ color:0x121826, roughness:0.95, metalness:0.05 });
+    const tireGeo = new THREE.TorusGeometry(0.62, 0.22, 14, 24);
+
+    function makeTireStack(){
+      const g = new THREE.Group();
+      for (let i=0;i<3;i++){
+        const t = new THREE.Mesh(tireGeo, tireMat);
+        t.rotation.x = Math.PI/2;
+        t.position.y = 0.45 + i*0.45;
+        g.add(t);
+
+        const inner = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.08, 10, 18), rimMat);
+        inner.rotation.x = Math.PI/2;
+        inner.position.copy(t.position);
+        g.add(inner);
+      }
+      return g;
+    }
+
+    function spawnObstacle(z){
+      const ln = Math.floor(Math.random()*3);
+      const stack = makeTireStack();
+      stack.position.set(laneX[ln], 0, z);
+      scene.add(stack);
+
+      obstacles.push({
+        mesh: stack,
+        size: new THREE.Vector3(1.9, 1.8, 1.9),
+        centerOffset: new THREE.Vector3(0, 0.9, 0)
+      });
+    }
+
+    // Moedas
+    const coinMat = new THREE.MeshStandardMaterial({
+      color:0xffd36d, emissive:0xffb02c, emissiveIntensity:0.55, roughness:0.35, metalness:0.2
+    });
+    const coinGeo = new THREE.TorusGeometry(0.52, 0.18, 14, 24);
+
+    function spawnCoin(z){
+      const ln = Math.floor(Math.random()*3);
+      const mesh = new THREE.Mesh(coinGeo, coinMat);
+      mesh.position.set(laneX[ln], 1.05, z);
+      mesh.rotation.x = Math.PI/2;
+      scene.add(mesh);
+
+      coins.push({ mesh, radius: 0.75 });
+    }
+
+    function clearEntities(){
+      for (const o of obstacles) scene.remove(o.mesh);
+      for (const c of coins) scene.remove(c.mesh);
+      obstacles.length = 0;
+      coins.length = 0;
+    }
+
+    // Fundo (bg.jpg) FIXO no infinito e GIGANTE pra cobrir o preto
+    const texLoader = new THREE.TextureLoader();
+    const bgTexture = texLoader.load(
+      "bg.jpg",
+      () => {},
+      undefined,
+      (err) => console.warn("Erro carregando bg.jpg:", err)
+    );
+    bgTexture.colorSpace = THREE.SRGBColorSpace;
+
+    const bgPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(140, 80),
+      new THREE.MeshBasicMaterial({ map: bgTexture, fog: false })
+    );
+
+    const BG_Z = -segLen * segCount - 60; // distância que você disse que gostou
+    bgPlane.position.set(0, 16, BG_Z);
+    scene.add(bgPlane);
+
+    function updateBgPlane(dt){
+      // fica sempre na mesma distância (não chega no carro)
+      bgPlane.position.z = BG_Z;
+      // acompanha de leve o carro
+      bgPlane.position.x = player.position.x * 0.25;
+      // altura fixa
+      bgPlane.position.y = 16;
+    }
+
+    // Controles
+    const keys = new Map();
+    addEventListener("keydown", e => keys.set(e.code, true));
+    addEventListener("keyup", e => keys.set(e.code, false));
+
+    function moveLeft(){ lane = Math.max(0, lane-1); }
+    function moveRight(){ lane = Math.min(2, lane+1); }
+    function jump(){
+      if (!playing || !onGround) return;
+      yVel = 9.0;
+      onGround = false;
+    }
+
+    // Mobile buttons
+    const prevent = (e)=>e.preventDefault();
+    $("leftBtn").addEventListener("touchstart",(e)=>{prevent(e); if(playing) moveLeft();},{passive:false});
+    $("rightBtn").addEventListener("touchstart",(e)=>{prevent(e); if(playing) moveRight();},{passive:false});
+    $("jumpBtn").addEventListener("touchstart",(e)=>{prevent(e); jump();},{passive:false});
+    $("resetBtn").addEventListener("touchstart",(e)=>{prevent(e); resetGame();},{passive:false});
+
+    // Start / dificuldade
+    function startGame(){
+      playing = true;
+      overlay.style.display = "none";
+      playBgm();
+    }
+    playBtn.addEventListener("pointerdown", (e)=>{ e.preventDefault(); startGame(); }, {passive:false});
+    playBtn.addEventListener("click", startGame);
+
+    hardBtn.addEventListener("pointerdown", (e)=>{ e.preventDefault(); difficulty = Math.min(2.2, difficulty + 0.2); }, {passive:false});
+    easyBtn.addEventListener("pointerdown", (e)=>{ e.preventDefault(); difficulty = Math.max(0.6, difficulty - 0.2); }, {passive:false});
+
+    // Reset
+    function resetGame(){
+      playing = false;
+      overlay.style.display = "grid";
+      $("title").textContent = "Runner 3D (Drive Vibe)";
+      $("sub").innerHTML = "Aperte <b>Jogar</b>. A velocidade aumenta com o tempo. (bg.jpg + nightcall.mp3 na pasta)";
+
+      bgm.pause();
+      bgm.currentTime = 0;
+
+      speed = 10.5;
+      dist = 0;
+      coinCount = 0;
+      distEl.textContent = "0";
+      coinsEl.textContent = "0";
+      spdEl.textContent = speed.toFixed(1);
+
+      lane = 1;
+      player.position.set(laneX[lane], 0, 2);
+      yVel = 0; onGround = true;
+
+      clearEntities();
+      for (let i=0;i<7;i++){
+        const z = -30 - i*18;
+        if (Math.random() < 0.75) spawnObstacle(z);
+        if (Math.random() < 0.85) spawnCoin(z - 9);
+      }
+
+      bgPlane.position.set(0, 16, BG_Z);
+    }
+
+    // Colisões
+    const tmpA = new THREE.Vector3();
+    const tmpB = new THREE.Vector3();
+
+    function getPlayerCenter(out){
+      out.set(player.position.x, player.position.y + 0.65, player.position.z);
+      return out;
+    }
+    function aabbHit(centerA, sizeA, centerB, sizeB){
+      return Math.abs(centerA.x - centerB.x) < (sizeA.x + sizeB.x)/2 &&
+             Math.abs(centerA.y - centerB.y) < (sizeA.y + sizeB.y)/2 &&
+             Math.abs(centerA.z - centerB.z) < (sizeA.z + sizeB.z)/2;
+    }
+    function sphereHit(centerA, rA, centerB, rB){
+      return centerA.distanceTo(centerB) <= (rA + rB);
+    }
+
+    // Loop
+    const clock = new THREE.Clock();
+    let spawnT = 0;
+
+    function animate(){
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.033);
+
+      // câmera segue
+      const camTarget = new THREE.Vector3(player.position.x, 7.2, player.position.z + 12);
+      camera.position.lerp(camTarget, 0.09);
+      camera.lookAt(player.position.x, player.position.y + 1.0, player.position.z - 20);
+
+      // rodas giram
+      for (const w of wheels) w.rotation.x -= (speed * 0.22) * dt;
+
+      if (playing){
+        // PC
+        if (keys.get("ArrowLeft") || keys.get("KeyA")) { keys.set("ArrowLeft", false); keys.set("KeyA", false); moveLeft(); }
+        if (keys.get("ArrowRight") || keys.get("KeyD")) { keys.set("ArrowRight", false); keys.set("KeyD", false); moveRight(); }
+        if (keys.get("Space")) { keys.set("Space", false); jump(); }
+
+        // troca de pista
+        player.position.x = THREE.MathUtils.lerp(player.position.x, laneX[lane], 0.24);
+
+        // pulo
+        yVel -= 22 * dt;
+        player.position.y += yVel * dt;
+        if (player.position.y <= 0){
+          player.position.y = 0;
+          yVel = 0;
+          onGround = true;
+        }
+
+        // aceleração / HUD
+        speed += (0.35 * difficulty) * dt;
+        spdEl.textContent = speed.toFixed(1);
+
+        dist += speed * dt;
+        distEl.textContent = Math.floor(dist).toString();
+
+        // pista infinita (sem sumir)
+        for (const seg of segments){
+          seg.position.z += speed * dt;
+          if (seg.position.z > segLen){
+            seg.position.z -= segLen * segCount;
+          }
+        }
+
+        // move entidades
+        for (const o of obstacles) o.mesh.position.z += speed * dt;
+        for (const c of coins){
+          c.mesh.position.z += speed * dt;
+          c.mesh.rotation.z += 5.0 * dt;
+        }
+
+        // spawn
+        spawnT += dt;
+        const spawnRate = Math.max(0.28, 0.68 / difficulty);
+        if (spawnT > spawnRate){
+          spawnT = 0;
+          const baseZ = -segLen*segCount - 10;
+          if (Math.random() < 0.78) spawnObstacle(baseZ);
+          if (Math.random() < 0.78) spawnCoin(baseZ - 10);
+        }
+
+        // despawn atrás
+        for (let i=obstacles.length-1;i>=0;i--){
+          if (obstacles[i].mesh.position.z > 22){
+            scene.remove(obstacles[i].mesh);
+            obstacles.splice(i,1);
+          }
+        }
+        for (let i=coins.length-1;i>=0;i--){
+          if (coins[i].mesh.position.z > 22){
+            scene.remove(coins[i].mesh);
+            coins.splice(i,1);
+          }
+        }
+
+        // colisões
+        const pCenter = getPlayerCenter(tmpA);
+        const pSize = new THREE.Vector3(1.9, 1.2, 3.1);
+        const pCoinR = 0.95;
+
+        for (const o of obstacles){
+          const bCenter = tmpB.copy(o.mesh.position).add(o.centerOffset);
+          if (aabbHit(pCenter, pSize, bCenter, o.size)){
+            playing = false;
+            overlay.style.display = "grid";
+            $("title").textContent = "Game Over 😵";
+            $("sub").innerHTML = `Distância: <b>${Math.floor(dist)}m</b> • Moedas: <b>${coinCount}</b><br>Toque em <b>Jogar</b> ou use 🔁.`;
+            bgm.pause();
+            break;
+          }
+        }
+
+        for (let i=coins.length-1;i>=0;i--){
+          const c = coins[i];
+          const cCenter = tmpB.copy(c.mesh.position);
+          if (sphereHit(pCenter, pCoinR, cCenter, c.radius)){
+            scene.remove(c.mesh);
+            coins.splice(i,1);
+            coinCount++;
+            coinsEl.textContent = coinCount.toString();
+          }
+        }
+
+        // brilho
+        carBodyMat.emissiveIntensity = 0.18 + 0.10*Math.sin(performance.now()*0.006);
+
+        // Fundo fixo (não chega no carro)
+        updateBgPlane(dt);
+      }
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    addEventListener("resize", ()=>{
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    resetGame();
+  </script>
+</body>
+</html>
